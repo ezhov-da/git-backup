@@ -2,6 +2,8 @@ package ru.ezhov.gitbackup
 
 import mu.KotlinLogging
 import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
+import org.kohsuke.github.GHRepository
 import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
@@ -24,44 +26,99 @@ fun main(args: Array<String>) {
 
 @Service
 class Run(
-    private val gitHubRepository: GitHubRepository
+    private val gitHubRepository: GitHubRepository,
+    private val githubConfig: GithubConfig,
+    private val directoryConfig: DirectoryConfig,
 ) : CommandLineRunner {
     override fun run(vararg args: String?) {
-        val archiveDirectory = File("./archive")
-
         val repositories = gitHubRepository.repositories()
 
-        gitHubRepository.repositories().forEachIndexed { index, repo ->
+        logger.info { "Repositories: ${repositories.size}" }
+
+        val loadRepositories = loadRepositories(repositories = repositories)
+        createOrUpdateArchives(loadedRepositories = loadRepositories)
+
+        logger.info { "Backup completed" }
+    }
+
+    private fun loadRepositories(repositories: List<GHRepository>): List<LoadedRepository> {
+        logger.info { "Repositories directory: ${directoryConfig.repositories().absolutePath}" }
+        directoryConfig.repositories().mkdirs()
+
+        val loadedRepositoryList = mutableListOf<LoadedRepository>()
+        repositories.forEachIndexed { index, repo ->
             logger.info { "Started '${index + 1}' from '${repositories.size}'. '${repo.name}'..." }
 
-            val localRepoDirectory = File("./repos", repo.name)
+            val localRepoDirectory = File(directoryConfig.repositories(), repo.name)
 
             if (localRepoDirectory.exists()) {
                 logger.info { "Repository '${repo.name}' already exists." }
+
+                val sizeBeforePull = getFolderSize(localRepoDirectory)
+
+                Git
+                    .open(localRepoDirectory)
+                    .pull()
+                    .setCredentialsProvider(UsernamePasswordCredentialsProvider(githubConfig.token, ""))
+                    .call()
+
+                logger.info { "Repository '${repo.name}' updated" }
+
+                val sizeAfterPull = getFolderSize(localRepoDirectory)
+
+                if (sizeBeforePull != sizeAfterPull) {
+                    logger.info { "Size before '$sizeBeforePull' is not equals after '$sizeAfterPull'" }
+
+                    loadedRepositoryList.add(LoadedRepository(repoFolder = localRepoDirectory, repo = repo, isChangeSize = true))
+                } else {
+                    logger.info { "'${repo.name}' size before '$sizeBeforePull' is equals after '$sizeAfterPull'" }
+
+                    loadedRepositoryList.add(LoadedRepository(repoFolder = localRepoDirectory, repo = repo, isChangeSize = false))
+                }
             } else {
-                val git = Git
+                Git
                     .cloneRepository()
                     .setURI(repo.httpTransportUrl)
                     .setDirectory(localRepoDirectory)
+                    .setCredentialsProvider(UsernamePasswordCredentialsProvider(githubConfig.token, ""))
                     .setCloneAllBranches(true)
                     .call()
+
+                loadedRepositoryList.add(LoadedRepository(repoFolder = localRepoDirectory, repo = repo, isChangeSize = true))
+
+                logger.info { "Repository ${repo.name} is new. Added to create archive" }
+            }
+        }
+
+        return loadedRepositoryList
+    }
+
+    private fun createOrUpdateArchives(loadedRepositories: List<LoadedRepository>) {
+        logger.info { "Archives directory directory: ${directoryConfig.archives().absolutePath}" }
+        directoryConfig.archives().mkdirs()
+
+        logger.info { "Archives for create/update: ${loadedRepositories.size}" }
+
+        loadedRepositories.forEach { repo ->
+            val archiveFile = File(directoryConfig.archives(), "${repo.repo.name}.zip")
+
+            // Skip if archive already exists and repository is not changed
+            if (archiveFile.exists() && !repo.isChangeSize) {
+                logger.info { "Archive '${archiveFile.absolutePath}' already exists and repository is not changed" }
+
+                return@forEach
             }
 
-            archiveDirectory.mkdirs()
-            val archiveFile = File(archiveDirectory, "${repo.name}.zip")
+            logger.info { "Archive '${archiveFile.absolutePath}' create started..." }
 
-            if (archiveFile.exists()) {
-                logger.info { "Archive '${repo.name}' already exists." }
-            } else {
-                val fos = FileOutputStream(archiveFile)
-                val zipOut = ZipOutputStream(fos)
+            val fos = FileOutputStream(archiveFile)
+            val zipOut = ZipOutputStream(fos)
 
-                zipFile(localRepoDirectory, localRepoDirectory.name, zipOut)
-                zipOut.close()
-                fos.close()
-            }
+            zipFile(repo.repoFolder, repo.repoFolder.name, zipOut)
+            zipOut.close()
+            fos.close()
 
-            logger.info { "Completed '${repo.name}'" }
+            logger.info { "Archive '$archiveFile' is created/updated" }
         }
     }
 
@@ -91,4 +148,25 @@ class Run(
         }
         fis.close()
     }
+
+    fun getFolderSize(folder: File): Long {
+        var length: Long = 0
+        val files = folder.listFiles() ?: return 0
+
+        for (file in files) {
+            length += if (file.isFile) {
+                file.length()
+            } else {
+                getFolderSize(file)
+            }
+        }
+
+        return length
+    }
 }
+
+data class LoadedRepository(
+    val repoFolder: File,
+    val repo: GHRepository,
+    val isChangeSize: Boolean,
+)

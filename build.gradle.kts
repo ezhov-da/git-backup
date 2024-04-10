@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.springframework.boot.gradle.tasks.bundling.BootJar
 
 plugins {
     id("org.springframework.boot") version "3.2.3"
@@ -8,7 +9,7 @@ plugins {
 }
 
 group = "ru.ezhov"
-version = "0.0.1-SNAPSHOT"
+version = "0.0.1"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -21,9 +22,10 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.kohsuke:github-api:1.319")
-    implementation("com.spotify:github-client:0.2.14")
-    implementation("org.eclipse.jgit:org.eclipse.jgit:6.9.0.202403050737-r")
+
+    implementation("org.kohsuke:github-api:1.319") // GitHub
+
+    implementation("org.eclipse.jgit:org.eclipse.jgit:6.9.0.202403050737-r") // Git
 
     implementation("ch.qos.logback:logback-classic:1.5.3")
     implementation("ch.qos.logback:logback-core:1.5.3")
@@ -41,4 +43,8 @@ tasks.withType<KotlinCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.withType<BootJar> {
+    archiveFileName.set("git-backup.jar")
 }

@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: git-backup
+
+github:
+  user: not set
+  token: not set
+
+directory:
+  repositories: "${user.home}/.github-backup/repositories"
+  archives: "${user.home}/.github-backup/archives"
