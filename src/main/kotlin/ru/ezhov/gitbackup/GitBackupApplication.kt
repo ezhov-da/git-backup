@@ -36,9 +36,13 @@ class Run(
         logger.info { "Repositories: ${repositories.size}" }
 
         val loadRepositories = loadRepositories(repositories = repositories)
-        createOrUpdateArchives(loadedRepositories = loadRepositories)
+        val createOrUpdatedArchives = createOrUpdateArchives(loadedRepositories = loadRepositories)
 
-        logger.info { "Backup completed" }
+        if (createOrUpdatedArchives.isNotEmpty()) {
+            logger.info { "Backup completed.\n${createOrUpdatedArchives.joinToString(separator = "\n") { "- ${it.name}" }}" }
+        } else {
+            logger.info { "Backup completed. No updated archives" }
+        }
     }
 
     private fun loadRepositories(repositories: List<GHRepository>): List<LoadedRepository> {
@@ -93,7 +97,9 @@ class Run(
         return loadedRepositoryList
     }
 
-    private fun createOrUpdateArchives(loadedRepositories: List<LoadedRepository>) {
+    private fun createOrUpdateArchives(loadedRepositories: List<LoadedRepository>): List<File> {
+        val archives = mutableListOf<File>()
+
         logger.info { "Archives directory directory: ${directoryConfig.archives().absolutePath}" }
         directoryConfig.archives().mkdirs()
 
@@ -111,15 +117,18 @@ class Run(
 
             logger.info { "Archive '${archiveFile.absolutePath}' create started..." }
 
-            val fos = FileOutputStream(archiveFile)
-            val zipOut = ZipOutputStream(fos)
+            FileOutputStream(archiveFile).use { fos ->
+                ZipOutputStream(fos).use { zipOut ->
+                    zipFile(repo.repoFolder, repo.repoFolder.name, zipOut)
+                }
+            }
 
-            zipFile(repo.repoFolder, repo.repoFolder.name, zipOut)
-            zipOut.close()
-            fos.close()
+            archives.add(archiveFile)
 
             logger.info { "Archive '$archiveFile' is created/updated" }
         }
+
+        return archives
     }
 
     // https://www.baeldung.com/java-compress-and-uncompress#zip_directory
